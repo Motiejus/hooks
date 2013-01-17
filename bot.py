@@ -24,13 +24,6 @@ GIT_DIR = "/bigdisk/git"
 # =============================================================================
 
 
-def aSillyBlockingMethod(bot):
-    while True:
-        time.sleep(10)
-        msg = "10 secs passed!"
-        bot.threadSafeMsg("#yadda", msg)
-
-
 class MomBot(irc.IRCClient):
     def _get_nickname(self):
         return self.factory.nickname
@@ -42,7 +35,6 @@ class MomBot(irc.IRCClient):
 
     def joined(self, channel):
         log.info("Joined %s" % channel)
-        #threads.deferToThread(aSillyBlockingMethod, self)
 
     def privmsg(self, user, channel, msg):
         log.debug("Message from %s: %s" % (user.split("!")[0], msg))
@@ -61,7 +53,7 @@ class MomBotFactory(protocol.ClientFactory):
 
     def clientConnectionLost(self, connector, reason):
         err = reason.getErrorMessage()
-        log.info("Lost connection, reconnecting. Error: %s" % err)
+        log.warn("Lost connection, reconnecting. Error: %s" % err)
         time.sleep(1)
         connector.connect()
 
@@ -80,18 +72,18 @@ cloning_now = {}
 
 
 def git_clone(pp, key, repo_dir, repo_url):
-    for i in range(1, 11):
+    for i in range(1, 6):
         cmd = ["git", "clone", "--quiet", "--bare", repo_url, repo_dir]
         if subprocess.call(cmd) == 0:
             pp("%s successfully cloned" % cloning_now.pop(key))
             return
         else:
-            pp("%d'th error cloning %s. Retrying after 10 secs" % (i, key))
+            pp("%d'th error cloning %s. Retrying after 60 secs" % (i, key))
             log.warn("error cloning %s for %d'th time" % (key, i))
             # just in case if there is some junk there
             subprocess.call(["rm", "-f", "-r", repo_dir])
-            time.sleep(10)
-    pp("10 times failed to clone %s, giving up")
+            time.sleep(60)
+    pp("5 times failed to clone %s, giving up")
     log.error("Given up on cloning %s" % key)
 
 
@@ -104,8 +96,8 @@ def git_fetch(pp, key, repo_dir, repo_url):
             pp("%s successfully fetched" % cloning_now.pop(key))
             return
         else:
-            pp("%d'th error fetching %s. Retrying after 10 secs" % (i, key))
-            time.sleep(10)
+            pp("%d'th error fetching %s. Retrying after 60 secs" % (i, key))
+            time.sleep(60)
     pp("5 times failed to fetch %s, giving up")
     log.error("Given up on cloning %s" % key)
 
@@ -116,7 +108,7 @@ def git_matched(pp, repo):
     if key in cloning_now:
         pp("%s is in progress. Not doing anything" % key)
     else:
-        cloning_now[key] = True
+        cloning_now[key] = repo_url
         repo_dir = os.path.join(GIT_DIR, REPO_OWNER, "%s.git" % repo)
         if os.path.exists(repo_dir):
             pp("repository %s already on disk. Fetching %s..." %
