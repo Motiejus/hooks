@@ -133,11 +133,18 @@ def git_work(pp, msg):
 
 def main():
     log.setLevel(logging.DEBUG)
-    consoleHandler = logging.StreamHandler()
-    log.addHandler(consoleHandler)
-    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s',
+    ch = logging.StreamHandler()
+    fh = logging.FileHandler(os.path.join(GIT_DIR, 'dcvs.debug.log'))
+    ch.setLevel(logging.INFO)
+    fh.setLevel(logging.DEBUG)
+    log.addHandler(fh)
+    log.addHandler(ch)
+    chformatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s',
             "%H:%M:%S")
-    consoleHandler.setFormatter(formatter)
+    ch.setFormatter(chformatter)
+    fhformatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    fh.setFormatter(fhformatter)
+
 
     if IRC_SSL:
         point = SSL4ClientEndpoint(reactor, IRC_HOST, IRC_PORT,
