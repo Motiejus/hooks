@@ -2,6 +2,8 @@
 from twisted.words.protocols import irc
 from twisted.internet import reactor, protocol
 from twisted.internet.threads import deferToThread
+from twisted.internet.endpoints import TCP4ClientEndpoint, SSL4ClientEndpoint
+from twisted.internet.ssl import CertificateOptions
 
 import os
 import subprocess
@@ -11,12 +13,13 @@ import re
 
 log = logging.getLogger(__name__)
 
+IRC_SSL = bool(os.environ.get("IRC_SSL", False))
 IRC_NICKNAME = os.environ.get("IRC_NICKNAME", "dcvsyoda")
 IRC_PASSWORD = os.environ.get("IRC_PASSWORD", None)
 IRC_SPEAK_CHANNEL = os.environ.get("IRC_SPEAK_CHANNEL", "#dcvs")
-IRC_LISTEN_CHANNEL = os.environ.get("IRC_LISTEN_CHANNEL", "#yadda")
+IRC_LISTEN_CHANNEL = os.environ.get("IRC_LISTEN_CHANNEL", "#github")
 IRC_HOST = os.environ.get("IRC_HOST", "irc.freenode.net")
-IRC_PORT = os.environ.get("IRC_HOST", 6667)
+IRC_PORT = int(os.environ.get("IRC_PORT", 6667))
 
 REPO_OWNER = os.environ.get("REPO_OWNER", "Motiejus")
 GIT_DIR = "/bigdisk/git"
@@ -28,6 +31,7 @@ GIT_DIR = "/bigdisk/git"
 
 class GitBot(irc.IRCClient):
     nickname = IRC_NICKNAME
+    password = IRC_PASSWORD
 
     def signedOn(self):
         self.join(IRC_LISTEN_CHANNEL)
@@ -135,7 +139,12 @@ def main():
             "%H:%M:%S")
     consoleHandler.setFormatter(formatter)
 
-    reactor.connectTCP(IRC_HOST, IRC_PORT, GitBotFactory())
+    if IRC_SSL:
+        point = SSL4ClientEndpoint(reactor, IRC_HOST, IRC_PORT,
+                CertificateOptions())
+    else:
+        point = TCP4ClientEndpoint(reactor, IRC_HOST, IRC_PORT)
+    point.connect(GitBotFactory())
     reactor.run()
 
 if __name__ == '__main__':
