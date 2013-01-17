@@ -11,8 +11,10 @@ import re
 
 log = logging.getLogger(__name__)
 
+IRC_NICKNAME = os.environ.get("IRC_NICKNAME", "dcvsyoda")
 IRC_PASSWORD = os.environ.get("IRC_PASSWORD", None)
-IRC_CHANNEL = os.environ.get("IRC_CHANNEL", "#yadda")
+IRC_SPEAK_CHANNEL = os.environ.get("IRC_SPEAK_CHANNEL", "#dcvs")
+IRC_LISTEN_CHANNEL = os.environ.get("IRC_LISTEN_CHANNEL", "#yadda")
 IRC_HOST = os.environ.get("IRC_HOST", "irc.freenode.net")
 IRC_PORT = os.environ.get("IRC_HOST", 6667)
 
@@ -24,32 +26,30 @@ GIT_DIR = "/bigdisk/git"
 # =============================================================================
 
 
-class MomBot(irc.IRCClient):
-    def _get_nickname(self):
-        return self.factory.nickname
-    nickname = property(_get_nickname)
+class GitBot(irc.IRCClient):
+    nickname = IRC_NICKNAME
 
     def signedOn(self):
-        self.join(self.factory.channel)
+        self.join(IRC_LISTEN_CHANNEL)
+        if IRC_LISTEN_CHANNEL != IRC_SPEAK_CHANNEL:
+            self.join(IRC_SPEAK_CHANNEL)
         log.info("Signed on as %s" % self.nickname)
 
     def joined(self, channel):
         log.info("Joined %s" % channel)
 
     def privmsg(self, user, channel, msg):
-        log.debug("Message from %s: %s" % (user.split("!")[0], msg))
-        git_work(lambda m: self.threadSafeMsg(IRC_CHANNEL, m), msg)
+        log.debug("Message from %s at %s: %s" %
+                (user.split("!")[0], channel, msg))
+        if channel == IRC_LISTEN_CHANNEL:
+            git_work(lambda m: self.threadSafeMsg(IRC_SPEAK_CHANNEL, m), msg)
 
     def threadSafeMsg(self, channel, message):
         reactor.callFromThread(self.msg, channel, message)
 
 
-class MomBotFactory(protocol.ClientFactory):
-    protocol = MomBot
-
-    def __init__(self, channel, nickname='yoda'):
-        self.channel = channel
-        self.nickname = nickname
+class GitBotFactory(protocol.ClientFactory):
+    protocol = GitBot
 
     def clientConnectionLost(self, connector, reason):
         err = reason.getErrorMessage()
@@ -135,7 +135,7 @@ def main():
             "%H:%M:%S")
     consoleHandler.setFormatter(formatter)
 
-    reactor.connectTCP(IRC_HOST, IRC_PORT, MomBotFactory(IRC_CHANNEL))
+    reactor.connectTCP(IRC_HOST, IRC_PORT, GitBotFactory())
     reactor.run()
 
 if __name__ == '__main__':
