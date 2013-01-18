@@ -144,7 +144,7 @@ def git_clone(pp, repo, attempt_no, args):
         log.warn(msg), pp(msg)
         desc = {'pp': pp, 'repo': repo, 'attempt_no': attempt_no + 1}
         exc.finished(repo)
-        threading.Timer(60, lambda: exc.add(repo, desc))
+        threading.Timer(60, lambda: exc.add(repo, desc)).start()
 
 
 def git_fetch(pp, repo, attempt_no, args):
@@ -169,7 +169,7 @@ def git_fetch(pp, repo, attempt_no, args):
         pp(msg), log.warn(msg)
         desc = {'pp': pp, 'repo': repo, 'attempt_no': attempt_no + 1}
         exc.finished(repo)
-        threading.Timer(60, lambda: exc.add(repo, desc))
+        threading.Timer(60, lambda: exc.add(repo, desc)).start()
 
 
 def git_work(pp, msg, repo_owner):
