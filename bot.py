@@ -1,15 +1,19 @@
 #!/usr/bin/env python
 from twisted.words.protocols import irc
 from twisted.internet import reactor, protocol
-from twisted.internet.threads import deferToThread
 from twisted.internet.endpoints import TCP4ClientEndpoint, SSL4ClientEndpoint
 from twisted.internet.ssl import CertificateOptions
+
+# For python <= 2.6 you can get this from pip:
+# pip install ordereddict
+from collections import OrderedDict
 
 import os
 import subprocess
 import time
 import logging
 import re
+import threading
 
 log = logging.getLogger(__name__)
 
@@ -21,6 +25,7 @@ IRC_LISTEN_CHANNEL = os.environ.get("IRC_LISTEN_CHANNEL", "#github")
 IRC_HOST = os.environ.get("IRC_HOST", "irc.freenode.net")
 IRC_PORT = int(os.environ.get("IRC_PORT", 6667))
 
+NUM_WORKERS = int(os.environ.get("NUM_WORKERS", 5))
 REPO_OWNER = os.environ.get("REPO_OWNER", "Motiejus")
 GIT_DIR = "/bigdisk/git"
 
@@ -41,10 +46,19 @@ class GitBot(irc.IRCClient):
 
     def joined(self, channel):
         log.info("Joined %s" % channel)
+        if channel == IRC_LISTEN_CHANNEL:
+            log.debug("Starting %d workers" % NUM_WORKERS)
+            for i in range(NUM_WORKERS):
+                pp = lambda m: self.threadSafeMsg(IRC_SPEAK_CHANNEL, m)
+                threading.Thread(target=worker_entry, args=(pp,)).start()
 
     def privmsg(self, user, channel, msg):
         log.debug("Message from %s at %s: %s" %
                 (user.split("!")[0], channel, msg))
+        if "!help" in msg:
+            self.threadSafeMsg(channel, "I can answer !help and !queue_status")
+        if "!queue_status" in msg:
+            self.threadSafeMsg(channel, repr(exc))
         if channel == IRC_LISTEN_CHANNEL:
             git_work(lambda m: self.threadSafeMsg(IRC_SPEAK_CHANNEL, m), msg)
 
@@ -72,68 +86,111 @@ class GitBotFactory(protocol.ClientFactory):
 # Git work
 # =============================================================================
 
-cloning_now = {}
+
+class LaborExchange(object):
+    def __init__(self):
+        self.cond = threading.Condition(threading.Lock())
+        self.q = OrderedDict()
+        self.wip = set()
+
+    def __repr__(self):
+        with self.cond:
+            return "Queue: %s, WIP: %s" % (self.q.keys(), list(self.wip))
+
+    def add(self, repo, job):
+        with self.cond:
+            if not (repo in self.wip and repo in self.q.keys()):
+                self.q[repo] = job
+                self.cond.notifyAll()
+
+    def get_and_start(self):
+        self.cond.acquire()
+        while not [repo for repo in self.q if repo not in self.wip]:
+            self.cond.wait()
+        repo, val = self.q.popitem(False)
+        self.wip.add(repo)
+        self.cond.release()
+        return repo, val
+
+    def finished(self, repo):
+        self.wip.remove(repo)
 
 
-def git_clone(pp, key, repo_dir, repo_url):
-    for i in range(1, 6):
-        cmd = ["git", "clone", "--quiet", "--bare", repo_url, repo_dir]
-        if subprocess.call(cmd) == 0:
-            repo = cloning_now.pop(key)
-            log.info("%s successfully cloned" % repo)
-            pp("%s successfully cloned" % repo)
-            return
-        else:
-            pp("%d'th error cloning %s. Retrying after 60 secs" % (i, key))
-            log.warn("error cloning %s for %d'th time" % (key, i))
-            # just in case if there is some junk there
-            subprocess.call(["rm", "-f", "-r", repo_dir])
-            time.sleep(60)
-    pp("5 times failed to clone %s, giving up")
-    log.error("Given up on cloning %s" % key)
+exc = LaborExchange()
 
 
-def git_fetch(pp, key, repo_dir, repo_url):
-    for i in range(1, 6):
-        env = os.environ.copy()
-        env['GIT_DIR'] = repo_dir
-        cmd = ["git", "fetch", "--prune", "--tags", "--quiet", repo_url]
-        if subprocess.call(cmd, env=env) == 0:
-            repo = cloning_now.pop(key)
-            log.info("%s successfully fetched" % repo)
-            pp("%s successfully fetched" % repo)
-            return
-        else:
-            pp("%d'th error fetching %s. Retrying after 60 secs" % (i, key))
-            time.sleep(60)
-    pp("5 times failed to fetch %s, giving up")
-    log.error("Given up on cloning %s" % key)
-
-
-def git_matched(pp, repo):
+def git_clone(pp, repo, attempt_no):
+    log.debug("Starting to clone %s for %d time" % (repo, attempt_no))
     repo_url = "git@github.com:%s/%s.git" % (REPO_OWNER, repo)
-    key = "%s/%s.git" % (REPO_OWNER, repo)
-    if key in cloning_now:
-        pp("%s is in progress. Not doing anything" % key)
-        log.info("%s in progress. Not doing anything" % key)
+    if attempt_no == 5:
+        pp("%d times failed to clone %s, giving up" % attempt_no)
+        log.error("Given up on cloning %s after %d times" % (repo, attempt_no))
+        exc.finished(repo)
+        return
+
+    cmd = ["git", "clone", "--quiet", "--bare", repo_url, repo_dir(repo)]
+    if subprocess.call(cmd) == 0:
+        msg = "%s successfully cloned" % repo_url
+        log.info(msg), pp(msg)
+        exc.finished(repo)
     else:
-        cloning_now[key] = repo_url
-        repo_dir = os.path.join(GIT_DIR, REPO_OWNER, "%s.git" % repo)
-        if os.path.exists(repo_dir):
-            pp("repository %s already on disk. Fetching %s..." %
-                    (key, repo_url))
-            deferToThread(lambda: git_fetch(pp, key, repo_dir, repo_url))
-        else:
-            pp("repository %s does not exist yet. Cloning %s..." %
-                    (key, repo_url))
-            deferToThread(lambda: git_clone(pp, key, repo_dir, repo_url))
+        msg = "%d'th error cloning %s. Enqueuing job after 60 secs" % \
+                (attempt_no, repo)
+        log.warn(msg), pp(msg)
+        desc = {'pp': pp, 'repo': repo, 'attempt_no': attempt_no + 1}
+        exc.finished(repo)
+        threading.Timer(60, lambda: exc.add(repo, desc))
+
+
+def git_fetch(pp, repo, attempt_no):
+    log.debug("Starting to fetch %s for %d time" % (repo, attempt_no))
+    repo_url = "git@github.com:%s/%s.git" % (REPO_OWNER, repo)
+    if attempt_no == 5:
+        msg = "5 times failed to fetch %s, giving up" % repo
+        pp(msg), log.error(msg)
+        exc.finished(repo)
+        return
+
+    env = os.environ.copy()
+    env['GIT_DIR'] = repo_dir(repo)
+    cmd = ["git", "fetch", "--prune", "--tags", "--quiet", repo_url]
+    if subprocess.call(cmd, env=env) == 0:
+        msg = "%s successfully fetched" % repo_url
+        log.info(msg), pp(msg)
+        exc.finished(repo)
+    else:
+        msg = "%d'th error fetching %s. Queuing retry in 60 secs" % \
+                (attempt_no, repo)
+        pp(msg), log.warn(msg)
+        desc = {'pp': pp, 'repo': repo, 'attempt_no': attempt_no + 1}
+        exc.finished(repo)
+        threading.Timer(60, lambda: exc.add(repo, desc))
 
 
 def git_work(pp, msg):
     """IRC-unaware git worker. pp is a status printer function"""
     ma = re.match(".*https://github.com/%s/([\w_.-]+)/.*" % REPO_OWNER, msg)
     if ma:
-        git_matched(pp, ma.group(1))
+        repo = ma.group(1)
+        pp("enqueueing %s/%s" % (REPO_OWNER, repo))
+        exc.add(repo, {'pp': pp, 'repo': ma.group(1), 'attempt_no': 0})
+
+
+def worker_entry(pp):
+    log.debug("Started worker")
+    while True:
+        "Entry to worker thread. Gets operations from exc and does work"
+        repo, v = exc.get_and_start()
+        if os.path.exists(repo_dir(repo)):
+            pp("repository %s already on disk. Fetching..." % repo)
+            git_fetch(pp, repo, v['attempt_no'])
+        else:
+            pp("repository %s does not exist yet. Cloning..." % repo)
+            git_clone(pp, repo, v['attempt_no'])
+
+
+def repo_dir(repo):
+    return os.path.join(GIT_DIR, REPO_OWNER, "%s.git" % repo)
 
 
 def main():
@@ -144,10 +201,11 @@ def main():
     fh.setLevel(logging.DEBUG)
     log.addHandler(fh)
     log.addHandler(ch)
-    chf = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s',
-            "%H:%M:%S")
+    chf = logging.Formatter(('[%(process)d] %(asctime)s - '
+        '%(levelname)s - %(message)s'), "%H:%M:%S")
     ch.setFormatter(chf)
-    fhf = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    fhf = logging.Formatter('[%(process)d] %(asctime)s - '
+        '%(levelname)s - %(message)s')
     fh.setFormatter(fhf)
 
     if IRC_SSL:
