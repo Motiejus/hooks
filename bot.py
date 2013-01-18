@@ -179,9 +179,9 @@ def git_work(pp, msg):
 
 
 def worker_entry(pp):
+    "Entry to worker thread. Gets operations from exc and does work"
     log.debug("Started worker")
     while True:
-        "Entry to worker thread. Gets operations from exc and does work"
         repo, v = exc.get_and_start()
         if os.path.exists(repo_dir(repo)):
             pp("repository %s already on disk. Fetching..." % repo)
