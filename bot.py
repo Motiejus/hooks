@@ -144,12 +144,11 @@ def main():
     fh.setLevel(logging.DEBUG)
     log.addHandler(fh)
     log.addHandler(ch)
-    chformatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s',
+    chf = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s',
             "%H:%M:%S")
-    ch.setFormatter(chformatter)
-    fhformatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-    fh.setFormatter(fhformatter)
-
+    ch.setFormatter(chf)
+    fhf = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    fh.setFormatter(fhf)
 
     if IRC_SSL:
         point = SSL4ClientEndpoint(reactor, IRC_HOST, IRC_PORT,
