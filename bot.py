@@ -50,7 +50,9 @@ class GitBot(irc.IRCClient):
             log.debug("Starting %d workers" % NUM_WORKERS)
             for i in range(NUM_WORKERS):
                 pp = lambda m: self.threadSafeMsg(IRC_SPEAK_CHANNEL, m)
-                threading.Thread(target=worker_entry, args=(pp,)).start()
+                t = threading.Thread(target=worker_entry, args=(pp,))
+                t.daemon = True
+                t.start()
 
     def privmsg(self, user, channel, msg):
         log.debug("Message from %s at %s: %s" %
