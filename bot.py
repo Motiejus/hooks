@@ -128,8 +128,8 @@ def git_clone(pp, repo, attempt_no, args):
     log.debug("Starting to clone %s for %d time" % (repo, attempt_no))
     repo_url = "git@github.com:%s/%s.git" % (args.repo_owner, repo)
     if attempt_no == 5:
-        pp("%d times failed to clone %s, giving up" % attempt_no)
-        log.error("Given up on cloning %s after %d times" % (repo, attempt_no))
+        msg = "%d times failed to clone %s, giving up" % (attempt_no, repo)
+        pp(msg), log.error(msg)
         exc.finished(repo)
         return
 
