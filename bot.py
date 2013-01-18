@@ -14,20 +14,10 @@ import time
 import logging
 import re
 import threading
+import argparse
 
 log = logging.getLogger(__name__)
 
-IRC_SSL = bool(os.environ.get("IRC_SSL", False))
-IRC_NICKNAME = os.environ.get("IRC_NICKNAME", "dcvsyoda")
-IRC_PASSWORD = os.environ.get("IRC_PASSWORD", None)
-IRC_SPEAK_CHANNEL = os.environ.get("IRC_SPEAK_CHANNEL", "#dcvs")
-IRC_LISTEN_CHANNEL = os.environ.get("IRC_LISTEN_CHANNEL", "#github")
-IRC_HOST = os.environ.get("IRC_HOST", "irc.freenode.net")
-IRC_PORT = int(os.environ.get("IRC_PORT", 6667))
-
-NUM_WORKERS = int(os.environ.get("NUM_WORKERS", 5))
-REPO_OWNER = os.environ.get("REPO_OWNER", "Motiejus")
-GIT_DIR = "/bigdisk/git"
 
 # =============================================================================
 # IRC stuff
@@ -35,22 +25,31 @@ GIT_DIR = "/bigdisk/git"
 
 
 class GitBot(irc.IRCClient):
-    nickname = IRC_NICKNAME
-    password = IRC_PASSWORD
+    @property
+    def args(self):
+        return self.factory.args
+
+    @property
+    def nickname(self):
+        return self.args.nickname
+
+    @property
+    def password(self):
+        return self.args.password
 
     def signedOn(self):
-        self.join(IRC_LISTEN_CHANNEL)
-        if IRC_LISTEN_CHANNEL != IRC_SPEAK_CHANNEL:
-            self.join(IRC_SPEAK_CHANNEL)
+        self.join(self.args.listen_channel)
+        if self.args.listen_channel != self.args.speak_channel:
+            self.join(self.args.speak_channel)
         log.info("Signed on as %s" % self.nickname)
 
     def joined(self, channel):
         log.info("Joined %s" % channel)
-        if channel == IRC_LISTEN_CHANNEL:
-            log.debug("Starting %d workers" % NUM_WORKERS)
-            for i in range(NUM_WORKERS):
-                pp = lambda m: self.threadSafeMsg(IRC_SPEAK_CHANNEL, m)
-                t = threading.Thread(target=worker_entry, args=(pp,))
+        if channel == self.args.listen_channel:
+            log.debug("Starting %d workers" % self.args.num_workers)
+            for i in range(self.args.num_workers):
+                pp = lambda m: self.threadSafeMsg(self.args.speak_channel, m)
+                t = threading.Thread(target=worker_entry, args=(pp, self.args))
                 t.daemon = True
                 t.start()
 
@@ -61,8 +60,9 @@ class GitBot(irc.IRCClient):
             self.threadSafeMsg(channel, "I can answer !help and !queue_status")
         if "!queue_status" in msg:
             self.threadSafeMsg(channel, repr(exc))
-        if channel == IRC_LISTEN_CHANNEL:
-            git_work(lambda m: self.threadSafeMsg(IRC_SPEAK_CHANNEL, m), msg)
+        if channel == self.args.listen_channel:
+            pp = lambda m: self.threadSafeMsg(self.args.speak_channel, m)
+            git_work(pp, msg, self.args.repo_owner)
 
     def threadSafeMsg(self, channel, message):
         reactor.callFromThread(self.msg, channel, message)
@@ -70,6 +70,9 @@ class GitBot(irc.IRCClient):
 
 class GitBotFactory(protocol.ClientFactory):
     protocol = GitBot
+
+    def __init__(self, args):
+        self.args = args
 
     def clientConnectionLost(self, connector, reason):
         err = reason.getErrorMessage()
@@ -121,16 +124,16 @@ class LaborExchange(object):
 exc = LaborExchange()
 
 
-def git_clone(pp, repo, attempt_no):
+def git_clone(pp, repo, attempt_no, args):
     log.debug("Starting to clone %s for %d time" % (repo, attempt_no))
-    repo_url = "git@github.com:%s/%s.git" % (REPO_OWNER, repo)
+    repo_url = "git@github.com:%s/%s.git" % (args.repo_owner, repo)
     if attempt_no == 5:
         pp("%d times failed to clone %s, giving up" % attempt_no)
         log.error("Given up on cloning %s after %d times" % (repo, attempt_no))
         exc.finished(repo)
         return
 
-    cmd = ["git", "clone", "--quiet", "--bare", repo_url, repo_dir(repo)]
+    cmd = ["git", "clone", "--quiet", "--bare", repo_url, repo_dir(args, repo)]
     if subprocess.call(cmd) == 0:
         msg = "%s successfully cloned" % repo_url
         log.info(msg), pp(msg)
@@ -144,9 +147,9 @@ def git_clone(pp, repo, attempt_no):
         threading.Timer(60, lambda: exc.add(repo, desc))
 
 
-def git_fetch(pp, repo, attempt_no):
+def git_fetch(pp, repo, attempt_no, args):
     log.debug("Starting to fetch %s for %d time" % (repo, attempt_no))
-    repo_url = "git@github.com:%s/%s.git" % (REPO_OWNER, repo)
+    repo_url = "git@github.com:%s/%s.git" % (args.repo_owner, repo)
     if attempt_no == 5:
         msg = "5 times failed to fetch %s, giving up" % repo
         pp(msg), log.error(msg)
@@ -154,7 +157,7 @@ def git_fetch(pp, repo, attempt_no):
         return
 
     env = os.environ.copy()
-    env['GIT_DIR'] = repo_dir(repo)
+    env['GIT_DIR'] = repo_dir(args, repo)
     cmd = ["git", "fetch", "--prune", "--tags", "--quiet", repo_url]
     if subprocess.call(cmd, env=env) == 0:
         msg = "%s successfully fetched" % repo_url
@@ -169,36 +172,67 @@ def git_fetch(pp, repo, attempt_no):
         threading.Timer(60, lambda: exc.add(repo, desc))
 
 
-def git_work(pp, msg):
+def git_work(pp, msg, repo_owner):
     """IRC-unaware git worker. pp is a status printer function"""
-    ma = re.match(".*https://github.com/%s/([\w_.-]+)/.*" % REPO_OWNER, msg)
+    ma = re.match(".*https://github.com/%s/([\w_.-]+)/.*" % repo_owner, msg)
     if ma:
         repo = ma.group(1)
-        pp("enqueueing %s/%s" % (REPO_OWNER, repo))
+        pp("enqueueing %s/%s" % (repo_owner, repo))
         exc.add(repo, {'pp': pp, 'repo': ma.group(1), 'attempt_no': 0})
 
 
-def worker_entry(pp):
+def worker_entry(pp, args):
     "Entry to worker thread. Gets operations from exc and does work"
     log.debug("Started worker")
     while True:
         repo, v = exc.get_and_start()
-        if os.path.exists(repo_dir(repo)):
+        if os.path.exists(repo_dir(args, repo)):
             pp("repository %s already on disk. Fetching..." % repo)
-            git_fetch(pp, repo, v['attempt_no'])
+            git_fetch(pp, repo, v['attempt_no'], args)
         else:
             pp("repository %s does not exist yet. Cloning..." % repo)
-            git_clone(pp, repo, v['attempt_no'])
+            git_clone(pp, repo, v['attempt_no'], args)
 
 
-def repo_dir(repo):
-    return os.path.join(GIT_DIR, REPO_OWNER, "%s.git" % repo)
+def repo_dir(args, repo):
+    return os.path.join(args.git_dir, args.repo_owner, "%s.git" % repo)
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    irc_gr = parser.add_argument_group("IRC options")
+    irc_gr.add_argument('-s', '--server', default='irc.freenode.net',
+            help="IRC host")
+    irc_gr.add_argument('-P', '--port', default=6667, type=int,
+            help="IRC port")
+    irc_gr.add_argument('-p', '--password', help="Server password")
+    irc_gr.add_argument('--ssl', action='store_true', default=False,
+            help="Use SSL")
+    irc_gr.add_argument('-n', '--nickname', default='dcvsyoda',
+            help="Bot nickname")
+    irc_gr.add_argument('-c', '--speak-channel', default='#dcvs',
+            help="Where bot speaks up")
+    irc_gr.add_argument('-l', '--listen-channel', default='#github',
+            help="Where bot listens for requests")
+
+    git_gr = parser.add_argument_group("Git options")
+    git_gr.add_argument('-o', '--repo-owner', default='spilgames',
+            help="Whos repositories to match and clone")
+    git_gr.add_argument('-d', '--git-dir', default='/bigdisk/git',
+            help="Directory for repositories and log files")
+
+    parser.add_argument('-w', '--num-workers', default=5,
+            help="Number of git workers")
+    return parser.parse_args()
 
 
 def main():
+    args = parse_args()
+
     log.setLevel(logging.DEBUG)
     ch = logging.StreamHandler()
-    fh = logging.FileHandler(os.path.join(GIT_DIR, 'dcvs.debug.log'))
+    fh = logging.FileHandler(os.path.join(args.git_dir, 'dcvs.debug.log'))
     ch.setLevel(logging.INFO)
     fh.setLevel(logging.DEBUG)
     log.addHandler(fh)
@@ -210,12 +244,12 @@ def main():
         '%(levelname)s - %(message)s')
     fh.setFormatter(fhf)
 
-    if IRC_SSL:
-        point = SSL4ClientEndpoint(reactor, IRC_HOST, IRC_PORT,
+    if args.ssl:
+        point = SSL4ClientEndpoint(reactor, args.server, args.port,
                 CertificateOptions())
     else:
-        point = TCP4ClientEndpoint(reactor, IRC_HOST, IRC_PORT)
-    point.connect(GitBotFactory())
+        point = TCP4ClientEndpoint(reactor, args.server, args.port)
+    point.connect(GitBotFactory(args))
     reactor.run()
 
 if __name__ == '__main__':
