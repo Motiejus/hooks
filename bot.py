@@ -231,7 +231,7 @@ def main():
     log.setLevel(logging.DEBUG)
     ch = logging.StreamHandler()
     fh = logging.FileHandler(os.path.join(args.git_dir, 'dcvs.debug.log'))
-    ch.setLevel(logging.INFO)
+    ch.setLevel(logging.DEBUG)
     fh.setLevel(logging.DEBUG)
     log.addHandler(fh)
     log.addHandler(ch)
