@@ -79,7 +79,9 @@ def git_clone(pp, key, repo_dir, repo_url):
     for i in range(1, 6):
         cmd = ["git", "clone", "--quiet", "--bare", repo_url, repo_dir]
         if subprocess.call(cmd) == 0:
-            pp("%s successfully cloned" % cloning_now.pop(key))
+            repo = cloning_now.pop(key)
+            log.info("%s successfully cloned" % repo)
+            pp("%s successfully cloned" % repo)
             return
         else:
             pp("%d'th error cloning %s. Retrying after 60 secs" % (i, key))
@@ -97,7 +99,9 @@ def git_fetch(pp, key, repo_dir, repo_url):
         env['GIT_DIR'] = repo_dir
         cmd = ["git", "fetch", "--prune", "--tags", "--quiet", repo_url]
         if subprocess.call(cmd, env=env) == 0:
-            pp("%s successfully fetched" % cloning_now.pop(key))
+            repo = cloning_now.pop(key)
+            log.info("%s successfully fetched" % repo)
+            pp("%s successfully fetched" % repo)
             return
         else:
             pp("%d'th error fetching %s. Retrying after 60 secs" % (i, key))
@@ -111,6 +115,7 @@ def git_matched(pp, repo):
     key = "%s/%s.git" % (REPO_OWNER, repo)
     if key in cloning_now:
         pp("%s is in progress. Not doing anything" % key)
+        log.info("%s in progress. Not doing anything" % key)
     else:
         cloning_now[key] = repo_url
         repo_dir = os.path.join(GIT_DIR, REPO_OWNER, "%s.git" % repo)
