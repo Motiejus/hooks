@@ -49,7 +49,8 @@ class GitBot(irc.IRCClient):
             log.debug("Starting %d workers" % self.args.num_workers)
             for i in range(self.args.num_workers):
                 pp = lambda m: self.threadSafeMsg(self.args.speak_channel, m)
-                t = threading.Thread(target=worker_entry, args=(pp, self.args))
+                t_args = (pp, self.args, self.factory.exc)
+                t = threading.Thread(target=worker_entry, args=t_args)
                 t.daemon = True
                 t.start()
 
@@ -59,10 +60,10 @@ class GitBot(irc.IRCClient):
         if "!help" in msg:
             self.threadSafeMsg(channel, "I can answer !help and !queue_status")
         if "!queue_status" in msg:
-            self.threadSafeMsg(channel, repr(exc))
+            self.threadSafeMsg(channel, repr(self.factory.exc))
         if channel == self.args.listen_channel:
             pp = lambda m: self.threadSafeMsg(self.args.speak_channel, m)
-            git_work(pp, msg, self.args.repo_owner)
+            git_work(pp, msg, self.args.repo_owner, self.factory.exc)
 
     def threadSafeMsg(self, channel, message):
         reactor.callFromThread(self.msg, channel, message)
@@ -71,8 +72,8 @@ class GitBot(irc.IRCClient):
 class GitBotFactory(protocol.ClientFactory):
     protocol = GitBot
 
-    def __init__(self, args):
-        self.args = args
+    def __init__(self, args, exc):
+        self.args, self.exc = args, exc
 
     def clientConnectionLost(self, connector, reason):
         err = reason.getErrorMessage()
@@ -121,10 +122,7 @@ class LaborExchange(object):
         self.wip.remove(repo)
 
 
-exc = LaborExchange()
-
-
-def git_clone(pp, repo, attempt_no, args):
+def git_clone(pp, repo, attempt_no, args, exc):
     log.debug("Starting to clone %s for %d time" % (repo, attempt_no))
     repo_url = "git@github.com:%s/%s.git" % (args.repo_owner, repo)
     if attempt_no == 5:
@@ -147,7 +145,7 @@ def git_clone(pp, repo, attempt_no, args):
         threading.Timer(60, lambda: exc.add(repo, desc)).start()
 
 
-def git_fetch(pp, repo, attempt_no, args):
+def git_fetch(pp, repo, attempt_no, args, exc):
     log.debug("Starting to fetch %s for %d time" % (repo, attempt_no))
     repo_url = "git@github.com:%s/%s.git" % (args.repo_owner, repo)
     if attempt_no == 5:
@@ -172,7 +170,7 @@ def git_fetch(pp, repo, attempt_no, args):
         threading.Timer(60, lambda: exc.add(repo, desc)).start()
 
 
-def git_work(pp, msg, repo_owner):
+def git_work(pp, msg, repo_owner, exc):
     """IRC-unaware git worker. pp is a status printer function"""
     ma = re.match(".*https://github.com/%s/([\w_.-]+)/.*" % repo_owner, msg)
     if ma:
@@ -181,17 +179,17 @@ def git_work(pp, msg, repo_owner):
         exc.add(repo, {'pp': pp, 'repo': ma.group(1), 'attempt_no': 0})
 
 
-def worker_entry(pp, args):
+def worker_entry(pp, args, exc):
     "Entry to worker thread. Gets operations from exc and does work"
     log.debug("Started worker")
     while True:
         repo, v = exc.get_and_start()
         if os.path.exists(repo_dir(args, repo)):
             pp("repository %s already on disk. Fetching..." % repo)
-            git_fetch(pp, repo, v['attempt_no'], args)
+            git_fetch(pp, repo, v['attempt_no'], args, exc)
         else:
             pp("repository %s does not exist yet. Cloning..." % repo)
-            git_clone(pp, repo, v['attempt_no'], args)
+            git_clone(pp, repo, v['attempt_no'], args, exc)
 
 
 def repo_dir(args, repo):
@@ -249,8 +247,10 @@ def main():
                 CertificateOptions())
     else:
         point = TCP4ClientEndpoint(reactor, args.server, args.port)
-    point.connect(GitBotFactory(args))
+    exc = LaborExchange()
+    point.connect(GitBotFactory(args, exc))
     reactor.run()
+
 
 if __name__ == '__main__':
     main()
