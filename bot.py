@@ -119,7 +119,8 @@ class LaborExchange(object):
         return repo, val
 
     def finished(self, repo):
-        self.wip.remove(repo)
+        with self.cond:
+            self.wip.remove(repo)
 
 
 def git_clone(pp, repo, attempt_no, args, exc):
