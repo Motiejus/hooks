@@ -26,6 +26,13 @@ do:
 To start github joining the channel and giving benefit, you should configure an
 IRC service hook for your project (Settings →  Service Hooks →  IRC).
 
+### Future work
+
+Because of too many moving parts it is unpractical to aim IRC bot to be 100%
+reliable. However, other types of notifications can be added easily. For
+example, listening of HTTP service hooks could be implemented with just 20-30
+lines of additional code.
+
 ### Dependencies
 
 This bot depends on following modules:
