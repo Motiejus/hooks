@@ -3,7 +3,8 @@
 ### Description
 
 This bot listens for github IRC bot notifications and fetches pre-configured
-repositories.
+repositories to the local machine. The local machine becomes read-only mirror
+for speedy local fetching from CI, development, staging machines and etcetra.
 
 For example, if someone in a channel says:
 
