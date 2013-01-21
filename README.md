@@ -13,7 +13,7 @@ For example, if someone in a channel says:
 The bot will start downloading (cloning if it is new, fetching otherwise) the
 repository `git@github.com/spilgames/rebar.git`.
 
-Then the repository can be safely and speedily be served locally.
+Then the repository can be safely and speedily served locally.
 
 ### Usage
 
