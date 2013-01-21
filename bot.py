@@ -58,9 +58,9 @@ class GitBot(irc.IRCClient):
         log.debug("Message from %s at %s: %s" %
                 (user.split("!")[0], channel, msg))
         if "!help" in msg:
-            self.threadSafeMsg(channel, "I can answer !help and !queue_status")
+            self.msg(channel, "I can answer !help and !queue_status")
         if "!queue_status" in msg:
-            self.threadSafeMsg(channel, repr(self.factory.exc))
+            self.msg(channel, repr(self.factory.exc))
         if channel == self.args.listen_channel:
             pp = lambda m: self.threadSafeMsg(self.args.speak_channel, m)
             git_work(pp, msg, self.args.repo_owner, self.factory.exc)
@@ -251,7 +251,6 @@ def main():
     exc = LaborExchange()
     point.connect(GitBotFactory(args, exc))
     reactor.run()
-
 
 if __name__ == '__main__':
     main()
