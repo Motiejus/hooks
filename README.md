@@ -17,8 +17,8 @@ Then the repository can be safely and speedily served locally.
 
 ### Usage
 
-`./bot.py` by default connects to `irc.freenet.net:6667` with nick `dcvsyoda`
-in channels `#dcvs` and `#github`. To change these (and other) settings, please
+`./bot.py` by default connects to `irc.freenet.net:6667` with nick `dvcsyoda`
+in channels `#dvcs` and `#github`. To change these (and other) settings, please
 do:
 
     ./bot.py --help

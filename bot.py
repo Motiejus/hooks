@@ -208,9 +208,9 @@ def parse_args():
     irc_gr.add_argument('-p', '--password', help="Server password")
     irc_gr.add_argument('--ssl', action='store_true', default=False,
             help="Use SSL")
-    irc_gr.add_argument('-n', '--nickname', default='dcvsyoda',
+    irc_gr.add_argument('-n', '--nickname', default='dvcsyoda',
             help="Bot nickname")
-    irc_gr.add_argument('-c', '--speak-channel', default='#dcvs',
+    irc_gr.add_argument('-c', '--speak-channel', default='#dvcs',
             help="Where bot speaks up")
     irc_gr.add_argument('-l', '--listen-channel', default='#github',
             help="Where bot listens for requests")
@@ -231,7 +231,7 @@ def main():
 
     log.setLevel(logging.DEBUG)
     ch = logging.StreamHandler()
-    fh = logging.FileHandler(os.path.join(args.git_dir, 'dcvs.debug.log'))
+    fh = logging.FileHandler(os.path.join(args.git_dir, 'dvcs.debug.log'))
     ch.setLevel(logging.INFO)
     fh.setLevel(logging.DEBUG)
     log.addHandler(fh)
